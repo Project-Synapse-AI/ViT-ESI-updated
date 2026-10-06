@@ -7,7 +7,6 @@ from scipy.io import loadmat, savemat
 import json
 import utils
 
-np.random.seed(0)
 ## PARAMETERS
 home = os.path.expanduser('~')
 root_folder = os.path.join(home, "Documents", "Data")
@@ -57,15 +56,18 @@ parser.add_argument("-amp", "--amplitude", type=float, default=1., help="base am
 parser.add_argument("-c", "--center", type=int, default=250, help="center of the ERP signal, in ms" )
 parser.add_argument("-w", "--width", type=int, default=50, help="width of the ERP signal, in ms")
 # deviation
-parser.add_argument("-itradev", "--intra_sample_dev", type=list, nargs='+', default=[0.7, 0.3, 0.1], 
+parser.add_argument("-itradev", "--intra_sample_dev", type=float, nargs=3, default=[0.7, 0.3, 0.1],
                     help="deviation parameters between patches of a given example - amplitude, center, width")
-parser.add_argument("-interdev","--inter_sample_dev", type=list, nargs='+', default=[0.5, 0.5, 0.02], 
+parser.add_argument("-interdev","--inter_sample_dev", type=float, nargs=3, default=[0.5, 0.5, 0.02],
                     help="deviation parameters between examples - amplitude, center, width")
 
 # Other parameters
 parser.add_argument("-ds", "--dont_save", action="store_true", help = "Do not save the data")
+parser.add_argument("--seed", type=int, default=0,
+                    help="numpy random seed (default 0 = the previously hard-coded seed, same output)")
 
 args = parser.parse_args()
+np.random.seed(args.seed)
 root_folder = args.root_folder
 print(f"root_folder: {root_folder}")
 anatomy_folder = args.anatomy_folder if args.anatomy_folder is not None else os.path.join(root_folder, "anatomy")
@@ -277,8 +279,9 @@ for e in range(1,args.n_examples+1) :
     p_range_center = np.array([ base_center - p_center_dev*base_center,
                                base_center + p_center_dev*base_center ])
     
+    erp_per_patch = []
     to_remove = []
-    available_sources = np.arange(0,n_sources,1) 
+    available_sources = np.arange(0,n_sources,1)
     
     for p in range(1,n_patch+1):
         #spatial
@@ -324,6 +327,7 @@ for e in range(1,args.n_examples+1) :
         #orders = np.hstack([orders, int(np.squeeze(order))]) #orders.append(order)
         orders.append(int(order))
         seeds.append(seed) #seeds = np.hstack([seeds, int(seed)])
+        erp_per_patch.append({k: float(np.squeeze(v)) for k, v in erp_params.items()})
         n_src += len(patches[f'patch_{p}'])    
         
     [X,source_data] = utils.generate_scalp_data(c_tot, leadfield, timeline)
@@ -348,7 +352,13 @@ for e in range(1,args.n_examples+1) :
             'seeds': list(seeds),
             'orders': list(orders), 
             'n_patch': n_patch,
-            'act_src': patches}
+            'act_src': patches,
+            # ERP timing (ms from window start): sample-level base values + each patch's
+            # actual parameters (patch k <-> seeds[k]); a patch peaks at its 'center'.
+            'base_center': float(np.squeeze(base_center)),
+            'base_width': float(np.squeeze(base_width)),
+            'base_amplitude': float(np.squeeze(base_amplitude)),
+            'erp': erp_per_patch}
         
         match_dict[f'id_{id}'] ={
             'act_src_file_name': os.path.join(saving_folder, "sources", "Jact", act_src_file),
@@ -402,7 +412,9 @@ if not args.dont_save :
         'electrode_space': electrode_space, 
         'source_space': source_space,
         'rec_info': rec_info,
-        'ids': list(int_ids)} 
+        'ids': list(int_ids),
+        'seed': args.seed,
+        'generator_args': vars(args)}
 
     general_config_file = os.path.join( saving_folder, f"{args.simu_name}{args.source_sampling}_config.json" )
     with open(general_config_file, 'w') as f: 

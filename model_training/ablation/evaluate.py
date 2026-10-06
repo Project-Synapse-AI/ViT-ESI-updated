@@ -114,6 +114,21 @@ def load_context(
     return EvalContext(dataset, md_keys, fwd, spos, neighbors, t_vec, simu_path, config)
 
 
+def heldout_indices(n, per_valid):
+    """
+    Indices main_train.py holds out (and eval.py scores) for -to_load n -per_valid p:
+    both call seed_everything(0) then random_split, so the held-out set depends only on (n, p).
+    Thesis protocol: train8k_s0 with n=8000, p=0.25 -> 6000 train / 2000 held out.
+    """
+    from pytorch_lightning import seed_everything
+    from torch.utils.data import random_split
+
+    seed_everything(0, verbose=False)
+    n_train = int(n * (1 - per_valid))
+    _, val = random_split(range(n), [n_train, n - n_train])
+    return list(val.indices)
+
+
 def evaluate(model, ctx, *, loss="cosine", seed=0, device="cpu", indices=None, reseed=True):
     """
     Run `model` over the samples in `indices` (default: all) and return a per-sample DataFrame.
@@ -236,7 +251,11 @@ def main():
     p.add_argument("-vit_mlp_dim", type=int, default=512)
     p.add_argument("-vit_dropout", type=float, default=0.1)
     p.add_argument("-legacy_order", action="store_true", help="mimic eval.py's RNG order (parity check only)")
-    p.add_argument("-per_valid", type=float, default=1.0, help="with -legacy_order: eval.py's validation fraction")
+    p.add_argument(
+        "-heldout", action="store_true",
+        help="score only the samples main_train.py held out for -to_load/-per_valid (thesis: train8k_s0, 8000, 0.25)",
+    )
+    p.add_argument("-per_valid", type=float, default=1.0, help="validation fraction for -heldout / -legacy_order")
     args = p.parse_args()
 
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -252,7 +271,13 @@ def main():
         args.source_space, args.electrode_montage, args.orientation, args.subject_name,
     )
 
+    if args.heldout and args.legacy_order:
+        raise SystemExit("use either -heldout or -legacy_order, not both")
     indices = None
+    if args.heldout:
+        if not 0 < args.per_valid < 1:
+            raise SystemExit("-heldout needs the training -per_valid (e.g. 0.25), not 1.0")
+        indices = heldout_indices(len(ctx.dataset), args.per_valid)
     if args.legacy_order:
         from torch.utils.data import random_split
 
@@ -263,7 +288,8 @@ def main():
     model = build_model(args.model, args, ctx.fwd.shape[0], ctx.fwd.shape[1], n_times)
     load_module_weights(model, args.ckpt)
 
-    print(f"Evaluating {args.model} on {ctx.simu_path} ({len(ctx.dataset)} samples, device={args.device})")
+    n_eval = len(indices) if indices is not None else len(ctx.dataset)
+    print(f"Evaluating {args.model} on {ctx.simu_path} ({n_eval} of {len(ctx.dataset)} samples, device={args.device})")
     df = evaluate(
         model, ctx, loss=args.loss, seed=args.seed, device=args.device,
         indices=indices, reseed=not args.legacy_order,
@@ -281,6 +307,8 @@ def main():
         "eeg_snr": args.eeg_snr,
         "seed": args.seed,
         "legacy_order": args.legacy_order,
+        "heldout": args.heldout,
+        "n_evaluated": int(len(df)),
         "device": args.device,
         "torch": torch.__version__,
         "git_commit": commit,
