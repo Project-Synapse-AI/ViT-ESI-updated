@@ -54,14 +54,19 @@ Exact versions are in `model_training/ablation/requirements-lock.txt`. Once per 
 ## Code facts that matter
 - `model_training/models/vit.py` `EEGViT`: each **timepoint is a token** (75 → 256 embed, depth 6, 8 heads), built on `nn.TransformerEncoderLayer`. In `eval()` it uses PyTorch's fused fast path, which skips Python hooks. Disable it (`torch.backends.mha.set_fastpath_enabled(False)`) before masking heads.
 - SEREEGA data is EEG `(75, 500)` sensors-first. `Jact` holds only active regions, scattered back to 994 via `md/<id>_md_json_flie.json`.
-  - ERP peaks default to 125–375 ms of the 1000 ms window.
-  - `-itradev`/`-interdev` are broken on the CLI (`type=list`), see #3.
-  - The md JSON doesn't store the peak centre until #3 lands.
+  - **ERP peaks:** the default base centre is 125–375 ms, and each patch varies ±30% around it, so peaks fall at about 88–488 ms of the 1000 ms window.
+  - **Peak metadata:** the md JSON stores `base_center` plus each patch's `erp` (`center`, `width`, `ampl`).
+  - **Seed:** generator `--seed`, default 0. Seed 0 equals the old hard-coded seed, so any new set needs a new seed or it duplicates the training data.
+  - **Patch counts:** patches per sample and patch order are actually 1–4, because `randint` excludes its upper bound.
 - The metric math lives in `utils/utl_eval.py` (`sample_metrics`), moved verbatim from eval.py, quirks included. Don't change it: any edit breaks comparability with the thesis.
 - The 5 metrics: LE (mm), AUC, nMSE, PSNR (dB), time error (ms). Thesis baselines (params M / LE mm): 1D-CNN 5.61/6.52 · LSTM 0.45/7.17 · DeepSIF 22.36/5.19 · **ViTESI 3.57/5.07**.
 
 ## Data & results
 - Never commit `simulation/`, `model_training/results/`, `.pt`/`.ckpt` or `.mat` outputs.
-- Datasets and checkpoints live on the team Drive (`SynapseAI-FYP/datasets/`, `SynapseAI-FYP/checkpoints/`), each with a README giving the exact command, seed and commit hash.
+- **Frozen datasets** (see `data_generation/FROZEN_DATASETS.md`):
+  - `train6k_s0` (train), `test2k_s1` (test) and `widepeak2k_s2` (A3).
+  - They are rebuilt locally from the commands in that file, not downloaded, and come out byte-identical.
+  - Never regenerate them with other settings.
+- Checkpoints go to the team Drive (`SynapseAI-FYP/checkpoints/`) with a README giving the exact command, seed and commit hash.
 - Every reported number must say which dataset, checkpoint and commit it came from.
 - Compare against the #4 baseline on the same frozen test set.
