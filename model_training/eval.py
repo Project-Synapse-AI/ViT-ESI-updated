@@ -34,6 +34,12 @@ from load_data.FolderStructure import FolderStructure
 from utils import utl
 from utils import utl_metrics as met
 from utils import utl_inv as inv
+from utils.utl_eval import (
+    load_leadfield_mat as _load_leadfield_mat,
+    load_module_weights as _load_module_weights,
+    rescale_prediction,
+    sample_metrics,
+)
 
 ############# METHODS ############################
 linear_methods = ["MNE", "sLORETA"]  # , "eLORETA"]
@@ -273,47 +279,6 @@ def _parse_ckpt_overrides(entries):
     return overrides
 
 
-def _strip_prefix(state_dict, prefix):
-    changed = False
-    new_state = {}
-    for k, v in state_dict.items():
-        if k.startswith(prefix):
-            new_state[k[len(prefix) :]] = v
-            changed = True
-        else:
-            new_state[k] = v
-    return new_state if changed else None
-
-
-def _add_prefix(state_dict, prefix):
-    return {f"{prefix}{k}": v for k, v in state_dict.items()}
-
-
-def _load_module_weights(module, weights_path):
-    checkpoint = torch.load(weights_path, map_location=torch.device("cpu"))
-    if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
-        base_state = checkpoint["state_dict"]
-    else:
-        base_state = checkpoint
-
-    candidates = [base_state]
-    for prefix in ("model.", "model.model."):
-        stripped = _strip_prefix(base_state, prefix)
-        if stripped is not None:
-            candidates.append(stripped)
-    for prefix in ("model.",):
-        candidates.append(_add_prefix(base_state, prefix))
-
-    last_error = None
-    for cand in candidates:
-        try:
-            module.load_state_dict(cand)
-            return
-        except RuntimeError as err:
-            last_error = err
-    raise RuntimeError(f"Failed to load weights from {weights_path}: {last_error}")
-
-
 # Normalize methods early so we can decide whether MNE is needed.
 try:
     ckpt_overrides = _parse_ckpt_overrides(args.ckpt_path)
@@ -370,20 +335,6 @@ folders = FolderStructure(str(root_base), general_config_dict)
 source_space = HeadModel.SourceSpace(folders, general_config_dict)
 electrode_space = HeadModel.ElectrodeSpace(folders, general_config_dict)
 head_model = HeadModel.HeadModel(electrode_space, source_space, folders, "fsaverage")
-
-def _load_leadfield_mat(mat_path: str):
-    m = loadmat(mat_path)
-    if "G" in m:
-        return m["G"]
-    if "fwd" in m:
-        return m["fwd"]
-    for k, v in m.items():
-        if k.startswith("__"):
-            continue
-        if isinstance(v, np.ndarray) and getattr(v, "ndim", 0) == 2:
-            return v
-    raise KeyError(f"No leadfield matrix found in {mat_path}. Keys={list(m.keys())}")
-
 
 if args.leadfield_mat:
     fwd = _load_leadfield_mat(args.leadfield_mat)
@@ -881,57 +832,39 @@ for k in val_ds.indices:
         elif method == "cnn_1d":
             with torch.no_grad():
                 j_hat = cnn.model(M.unsqueeze(0)).squeeze()
-            if cnn1d_params["loss"] == "cosine":
-                j_hat = utl.gfp_scaling(
-                    M_unscaled,
-                    j_hat,
-                    torch.from_numpy(fwd),
-                )
-            else:  # amplitude rescale
-                j_hat = j_hat * val_ds.dataset.max_src[k]
+            j_hat = rescale_prediction(
+                j_hat, M_unscaled, fwd, cnn1d_params["loss"], val_ds.dataset.max_src[k]
+            )
 
         elif method == "lstm":
             with torch.no_grad():
                 j_hat = lstm(M.unsqueeze(0)).squeeze()
-            if lstm_params["loss"] == "cosine":
-                j_hat = utl.gfp_scaling(
-                    M_unscaled,
-                    j_hat,
-                    torch.from_numpy(fwd),
-                )  # * esi_datamodule.train_scaler.maxs[k]
-            else:  # amplitude rescale
-                j_hat = j_hat * val_ds.dataset.max_src[k]
+            j_hat = rescale_prediction(
+                j_hat, M_unscaled, fwd, lstm_params["loss"], val_ds.dataset.max_src[k]
+            )
 
         elif method == "deep_sif":
             with torch.no_grad():
                 j_hat = deep_sif(M.unsqueeze(0)).squeeze()
-            if deep_sif_params["loss"] == "cosine":
-                j_hat = utl.gfp_scaling(
-                    M_unscaled,
-                    j_hat,
-                    torch.from_numpy(fwd),
-                )  # * esi_datamodule.train_scaler.maxs[k]
-            else:  # amplitude rescale
-                j_hat = j_hat * val_ds.dataset.max_src[k]
+            j_hat = rescale_prediction(
+                j_hat, M_unscaled, fwd, deep_sif_params["loss"], val_ds.dataset.max_src[k]
+            )
 
         elif method == "eeg_vit":
             with torch.no_grad():
                 j_hat = eeg_vit(M.unsqueeze(0)).squeeze()
-            if vit_params.get("loss", args.train_loss) == "cosine":
-                j_hat = utl.gfp_scaling(M_unscaled, j_hat, torch.from_numpy(fwd))
-            else:
-                j_hat = j_hat * val_ds.dataset.max_src[k]
+            j_hat = rescale_prediction(
+                j_hat,
+                M_unscaled,
+                fwd,
+                vit_params.get("loss", args.train_loss),
+                val_ds.dataset.max_src[k],
+            )
 
         else:
             sys.exit(f"unrecognized method {method}")
 
         # -------------------- Metrics for this method -------------------- #
-        le = 0
-        te = 0
-        nmse = 0
-        auc_val = 0
-        seeds_hat = []
-
         # dataset-dependent seeds / patches
         if args.eval_simu_type.lower() == "sereega":
             seeds = val_ds.dataset.md_dict[md_keys[k]]["seeds"]
@@ -951,67 +884,15 @@ for k in val_ds.indices:
             for kk in range(len(seeds)):
                 patches[kk] = val_ds.dataset.md_dict[md_keys[k]]["act_src"][f"patch_{kk+1}"]
 
-        # Overlap handling (only meaningful if there are >= 2 sources)
-        if len(patches) >= 2:
-            inter = list(set(patches[0]).intersection(patches[1]))
-            if len(inter) > 0:
-                overlapping_regions += 1
-                to_keep = torch.argmax(
-                    torch.Tensor(
-                        [j[seeds[0], :].abs().max(), j[seeds[1], :].abs().max()]
-                    )
-                )
-                seeds = [seeds[to_keep]]
-                patches = [patches[to_keep]]
+        r = sample_metrics(j, j_unscaled, j_hat, seeds, patches, spos, neighbors, t_vec)
+        if r["overlap"]:
+            overlapping_regions += 1
 
-        act_src = [s for l in patches for s in l]
-
-        for kk in range(len(seeds)):
-            s = seeds[kk]
-            other_sources = np.setdiff1d(act_src, patches[kk])
-            t_eval_gt = torch.argmax(j[s, :].abs())
-
-            # find estimated seed in a neighboring area
-            eval_zone = utl.get_patch(order=5, idx=s, neighbors=neighbors)
-            eval_zone = np.setdiff1d(eval_zone, other_sources)
-            eval_zone = utl.get_patch(order=2, idx=s, neighbors=neighbors)
-
-            s_hat = eval_zone[torch.argmax(j_hat[eval_zone, t_eval_gt].abs())]
-            t_eval_pred = torch.argmax(j_hat[s_hat, :].abs())
-
-            le += torch.sqrt(((spos[s, :] - spos[s_hat, :]) ** 2).sum())
-            te += np.abs(t_vec[t_eval_gt] - t_vec[t_eval_pred])
-            auc_val += met.auc_t(j_unscaled, j_hat, t_eval_gt, thresh=True, act_thresh=0.0)
-
-            nmse_tmp = (
-                (
-                    j_unscaled[:, t_eval_gt] / j_unscaled[:, t_eval_gt].abs().max()
-                    - j_hat[:, t_eval_gt] / j_hat[:, t_eval_gt].abs().max()
-                )
-                ** 2
-            ).mean()
-            nmse += nmse_tmp
-
-            seeds_hat.append(s_hat)
-
-        le = le / len(seeds)
-        te = te / len(seeds)
-        nmse = nmse / len(seeds)
-        auc_val = auc_val / len(seeds)
-
-        time_error_dict[method][c] = te
-        loc_error_dict[method][c] = le
-        nmse_dict[method][c] = nmse
-        auc_dict[method][c] = auc_val
-
-        psnr_dict[method][c] = psnr(
-            (j_unscaled / j_unscaled.abs().max()).numpy(),
-            (j_hat / j_hat.abs().max()).numpy(),
-            data_range=(
-                (j_unscaled / j_unscaled.abs().max()).min()
-                - (j_hat / j_hat.abs().max()).max()
-            ),
-        )
+        time_error_dict[method][c] = r["te"]
+        loc_error_dict[method][c] = r["le"]
+        nmse_dict[method][c] = r["nmse"]
+        auc_dict[method][c] = r["auc"]
+        psnr_dict[method][c] = r["psnr"]
 
     c += 1
 
