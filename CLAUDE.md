@@ -33,10 +33,22 @@ Never, without asking first:
 - guess a thesis hyperparameter.
 
 ## Setup & commands
-Windows + PowerShell, RTX 3060 Laptop 6 GB. From the repo root: `python -m venv venv; venv\Scripts\activate; pip install -r requirements.txt` (CUDA build of torch), then `$env:PROJECT_ROOT = (Get-Location).Path`.
+Windows + PowerShell, RTX 3060 Laptop 6 GB. From the repo root:
+1. `python -m venv venv; venv\Scripts\activate`
+2. `pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128`
+3. `pip install -r requirements.txt`
+4. `$env:PROJECT_ROOT = (Get-Location).Path`
+
+Exact versions are in `model_training/ablation/requirements-lock.txt`. Once per clone, run `python model_training/ablation/build_model_folder.py -root .`. It builds the head-model folder that the evaluation code needs.
 - Generate data: `python data_generation/sereega/simu_extended_source.py -sin <name> -ne <N> -mk standard_1020 -ss fsav_994 -o constrained -sn fsaverage -rf "$PROJECT_ROOT" --leadfield_mat "$PROJECT_ROOT/anatomy/leadfield_75_20k.mat" -fs 500 -d 1000 -af "$PROJECT_ROOT/anatomy"`
 - Train (from `model_training/`): `python main_train.py <simu_name> -simu_type sereega -source_space fsav_994 -electrode_montage standard_1020 -orientation constrained -model {VIT,1DCNN,LSTM,DEEPSIF} -loss cosine -scaler linear -eeg_snr 5 -n_times 500 -per_valid 0.2 -to_load <N> -n_epochs <E> -leadfield_mat ... -simu_folder ... -results_path "$PROJECT_ROOT/model_training/results"`. ViT size flags: `-vit_depth -vit_heads -vit_embed_dim -vit_mlp_dim`.
-- Evaluate: `model_training/eval.py` (all 5 metrics, per sample). Params/FLOPs: `python count_flops.py --model VIT --input_shape 500 75`.
+- **Evaluate ablations with the harness**, not eval.py: `python model_training/ablation/evaluate.py <simu_name> -root_simu . -ckpt <.pt> -model VIT -to_load <N> -out model_training/results/ablation/<test>/<run>`.
+  - It writes `per_sample.csv` (LE_mm, AUC, nMSE, PSNR, time_err_ms, peak_time_ms…) and `summary.json`.
+  - Each sample is seeded with `seed + index`, so every run sees identical noise.
+  - Use `-device cuda` for every run you compare. CPU differs by float rounding.
+  - In Python: `ablation.evaluate.load_context()` + `evaluate(model, ctx)`.
+- eval.py (multi-method, thesis script): pass `-root_simu <repo>/simulation/fsaverage`, the subject folder, not the repo root.
+- Params/FLOPs: `python count_flops.py --model VIT --input_shape 500 75`.
 - No test suite. "Testing" means a smoke run with small `-ne`, `-to_load` and `-n_epochs`, and it must pass before any full run.
 
 ## Code facts that matter
@@ -45,6 +57,7 @@ Windows + PowerShell, RTX 3060 Laptop 6 GB. From the repo root: `python -m venv 
   - ERP peaks default to 125–375 ms of the 1000 ms window.
   - `-itradev`/`-interdev` are broken on the CLI (`type=list`), see #3.
   - The md JSON doesn't store the peak centre until #3 lands.
+- The metric math lives in `utils/utl_eval.py` (`sample_metrics`), moved verbatim from eval.py, quirks included. Don't change it: any edit breaks comparability with the thesis.
 - The 5 metrics: LE (mm), AUC, nMSE, PSNR (dB), time error (ms). Thesis baselines (params M / LE mm): 1D-CNN 5.61/6.52 · LSTM 0.45/7.17 · DeepSIF 22.36/5.19 · **ViTESI 3.57/5.07**.
 
 ## Data & results
