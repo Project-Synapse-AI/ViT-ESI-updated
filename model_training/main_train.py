@@ -161,6 +161,8 @@ parser.add_argument(
     help="also retain and export the best checkpoint under the other loss criterion",
 )
 parser.add_argument("-require_cuda", action="store_true", help="hard stop instead of CPU fallback")
+parser.add_argument("-plain_progress", action="store_true", help="print batch/epoch progress and save progress.jsonl")
+parser.add_argument("-save_last_checkpoint", action="store_true", help="retain a resumable last.ckpt each epoch")
 parser.add_argument(
     "-deterministic", action="store_true",
     help="require deterministic operations for verification (not used by the full baseline protocol)",
@@ -444,6 +446,7 @@ checkpoint_callback = ModelCheckpoint(
     monitor=args.checkpoint_monitor,
     mode="min",
     save_top_k=1,
+    save_last=args.save_last_checkpoint,
 )
 checkpoint_callbacks = [checkpoint_callback]
 if args.save_comparison_checkpoint:
@@ -478,6 +481,10 @@ else:
     cbs = [*checkpoint_callbacks, early_stop_cb]
 
 # trainer
+if args.plain_progress:
+    from ablation.plain_progress import PlainProgress
+    cbs.append(PlainProgress(Path(results_path) / "progress.jsonl"))
+
 trainer = pl.Trainer(
     accelerator=device.type,
     max_epochs=args.ep,
@@ -486,6 +493,7 @@ trainer = pl.Trainer(
     log_every_n_steps=1, ## pas ce que je veux non?
     gradient_clip_val=gc_val,
     deterministic=True if args.deterministic else None,
+    enable_progress_bar=not args.plain_progress,
 )
 
 print(

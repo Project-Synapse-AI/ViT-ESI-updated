@@ -22,9 +22,10 @@ import json
 import os
 import platform
 import shlex
-import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 # Kaggle's "T4 x2" has two GPUs and Lightning's devices="auto" would train with DDP on both,
@@ -66,16 +67,43 @@ class Job:
         log_path = self.out / "logs" / f"{stage}.log"
         with open(log_path, "w") as log:
             proc = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            for line in proc.stdout:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                log.write(line)
-                log.flush()
-            proc.wait()
+            stopped = threading.Event()
+            monitor = threading.Thread(target=self.heartbeat, args=(stage, proc, stopped), daemon=True)
+            monitor.start()
+            try:
+                for line in proc.stdout:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                    log.write(line)
+                    log.flush()
+                proc.wait()
+            finally:
+                stopped.set()
+                monitor.join(timeout=12)
         record.update(finished_utc=_now(), returncode=proc.returncode)
         self.save()
         if proc.returncode != 0:
             raise SystemExit(f"HARD STOP: stage '{stage}' failed (exit {proc.returncode}); see {log_path}")
+
+    def heartbeat(self, stage, proc, stopped):
+        started = time.monotonic()
+        while not stopped.wait(60):
+            record = {"utc": _now(), "stage": stage, "pid": proc.pid,
+                      "elapsed_s": round(time.monotonic() - started),
+                      "child_running": proc.poll() is None}
+            try:
+                gpu = subprocess.run([
+                    "nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used,memory.total",
+                    "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10)
+                record["gpu_index_util_percent_used_mib_total_mib"] = gpu.stdout.strip()
+                record["gpu_query_returncode"] = gpu.returncode
+            except (OSError, subprocess.TimeoutExpired) as error:
+                record["gpu_query_error"] = str(error)
+            # Heartbeats show process/resource state, not proof of advancing epochs.
+            line = json.dumps(record)
+            with (self.out / "heartbeat.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(line + "\n")
+            print("RESOURCE_HEARTBEAT " + line, flush=True)
 
 
 def _now():
@@ -148,7 +176,8 @@ def generate(job, name, n):
 
 
 def train(job, model, n_load, epochs, extra):
-    results = ROOT / "model_training/results/kaggle"
+    # Save checkpoints/logs into Kaggle output during training, including failures.
+    results = job.out.resolve() / "training"
     job.run(f"train_{model}", [
         sys.executable, "main_train.py", "train8k_s0", "-results_path", str(results),
         "-simu_type", "sereega", "-source_space", "fsav_994", "-electrode_montage", "standard_1020",
@@ -156,6 +185,7 @@ def train(job, model, n_load, epochs, extra):
         "-eeg_snr", "5", "-n_times", "500", "-per_valid", "0.25", "-to_load", str(n_load),
         "-n_epochs", str(epochs), "-batch_size", "8", "-require_cuda",
         "-checkpoint_monitor", "validation_loss", "-save_comparison_checkpoint",
+        "-plain_progress", "-save_last_checkpoint",
         "-leadfield_mat", str(ROOT / "anatomy/leadfield_75_20k.mat"), "-simu_folder", str(SIMU / "train8k_s0"),
         *extra,
     ], cwd=ROOT / "model_training")
@@ -213,7 +243,6 @@ def main():
         results["widepeak2k_s2"] = evaluate(job, args.model, ckpt, "widepeak2k_s2", sizes["widepeak2k_s2"], False, model_args)
 
     run_dir = ckpt.parents[1]
-    shutil.copytree(run_dir, job.out / "training", dirs_exist_ok=True)
     job.manifest.update(results=results, checkpoint=str(ckpt.relative_to(run_dir)), finished_utc=_now(), status="passed")
     job.save()
     print("\nRESULTS", json.dumps(results, indent=2))
