@@ -50,6 +50,13 @@ def make_manifest(args, repo_root, simu_path, train_ds, val_ds, model, lr, devic
             "cudnn_benchmark": torch.backends.cudnn.benchmark,
         },
         "dataset": str(Path(simu_path).resolve()), "seed": 0,
+        "data_loading": {
+            "num_workers": args.num_workers, "pin_memory": args.pin_memory,
+            "persistent_workers": args.persistent_workers,
+            "prefetch_factor": args.prefetch_factor if args.num_workers else None,
+            "lightning_seed_workers": bool(args.num_workers),
+        },
+        "trainer_options": {"precision": args.precision, "devices": args.devices},
         "train_indices": list(train_ds.indices), "heldout_indices": list(val_ds.indices),
         "train_ids": [ids[i] for i in train_ds.indices],
         "heldout_ids": [ids[i] for i in val_ds.indices],

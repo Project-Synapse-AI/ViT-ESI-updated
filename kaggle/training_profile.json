@@ -1,0 +1,12 @@
+{
+  "name": "a4-workers4-fp32-v1",
+  "selected_on": "2026-10-23",
+  "benchmark_commit": "780e97fdcad3220d8e6d8c6b6c1e076e12a73243",
+  "num_workers": 4,
+  "pin_memory": true,
+  "persistent_workers": true,
+  "prefetch_factor": 1,
+  "batch_size": 8,
+  "devices": 1,
+  "precision": "32-true"
+}
