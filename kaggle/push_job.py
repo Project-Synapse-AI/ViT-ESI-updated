@@ -41,7 +41,7 @@ def _username():
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--job", choices=["smoke", "full"], required=True)
+    p.add_argument("--job", choices=["smoke", "full", "benchmark"], required=True)
     p.add_argument("--model", default="VIT", choices=["VIT", "1DCNN", "LSTM", "DEEPSIF"])
     p.add_argument("--train-args", default="")
     p.add_argument("--eval-args", default="")

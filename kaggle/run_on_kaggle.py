@@ -212,7 +212,7 @@ def evaluate(job, model, ckpt, name, n, heldout, model_args):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--job", choices=["smoke", "full"], required=True)
+    p.add_argument("--job", choices=["smoke", "full", "benchmark"], required=True)
     p.add_argument("--model", default="VIT", choices=["VIT", "1DCNN", "LSTM", "DEEPSIF"])
     p.add_argument("--train-args", default="", help="extra main_train.py flags, e.g. '-vit_depth 4'")
     p.add_argument("--eval-args", default="", help="matching evaluate.py flags, e.g. '-vit_depth 4'")
@@ -226,6 +226,17 @@ def main():
     job.save()
     environment(job)
     install(job)
+
+    if args.job == "benchmark":
+        if args.model != "VIT" or args.train_args or args.eval_args or args.widepeak:
+            raise SystemExit("HARD STOP: benchmark uses fixed depth-6 VIT settings")
+        generate(job, "train8k_s0", 8000)
+        job.run("benchmark", [sys.executable, "kaggle/benchmark_training.py",
+                "--simu-folder", str(SIMU / "train8k_s0"), "--out", str(job.out / "benchmark")])
+        job.manifest.update(status="passed", finished_utc=_now(),
+                            results=json.loads((job.out / "benchmark/benchmark.json").read_text()))
+        job.save()
+        return
 
     sizes = {name: (spec["smoke_n"] if smoke else spec["n"]) for name, spec in DATASETS.items()}
     names = ["train8k_s0", "test2k_s1"] + (["widepeak2k_s2"] if args.widepeak else [])
