@@ -46,3 +46,21 @@ SEREEGA dataset (three batches/trial); it is not a Kaggle speed measurement:
 ```powershell
 python kaggle/benchmark_training.py --simu-folder <mes_debug_python> --out <ignored-results-path> --smoke
 ```
+
+## Frozen training profile (2026-10-23)
+
+User-selected configuration is versioned in `training_profile.json`:
+workers 4, pinning and persistent workers enabled, prefetch factor 1,
+batch 8, one GPU, FP32 (`32-true`). The Kaggle smoke/full runner reads it,
+records its contents and SHA-256 in `job_manifest.json`, and rejects extra
+arguments that override the profile or frozen data/training protocol.
+Direct `main_train.py` commands retain legacy loader defaults unless the new
+flags are supplied. Its guarded entry point permits spawned loader workers.
+Lightning worker seeding is enabled and the actual loader settings are saved
+in each training manifest.
+
+Before A4: smoke this production profile on Kaggle, run a matching depth-6
+100-epoch calibration with both 2,000-sample evaluations, audit the results,
+and record its checkpoint as the control. The prior workers-0 calibration
+remains a historical comparison. Initial A4 sweep is depth 1/2/3/4 against
+depth 6 with seed 0; additional seeds require a separate time-budget decision.

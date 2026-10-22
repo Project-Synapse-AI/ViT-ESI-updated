@@ -18,6 +18,7 @@ full : the thesis protocol from #4 (8,000 loaded, 6,000 / 2,000 split, 100 epoch
 import argparse
 import datetime
 import glob
+import hashlib
 import json
 import os
 import platform
@@ -38,6 +39,7 @@ os.environ["PYTHONUNBUFFERED"] = "1"
 ROOT = Path(__file__).resolve().parents[1]
 SIMU = ROOT / "simulation/fsaverage/constrained/standard_1020/fsav_994/simu"
 FINGERPRINTS = ROOT / "data_generation/fingerprints"
+PROFILE_PATH = ROOT / "kaggle/training_profile.json"
 
 # Exactly the generator settings in data_generation/FROZEN_DATASETS.md.
 DATASETS = {
@@ -176,6 +178,16 @@ def generate(job, name, n):
 
 
 def train(job, model, n_load, epochs, extra):
+    profile = json.loads(PROFILE_PATH.read_text())
+    locked = {"-num_workers", "-pin_memory", "-persistent_workers", "-prefetch_factor",
+              "-devices", "-precision", "-batch_size", "--bs", "-n_epochs", "--ep",
+              "-to_load", "-per_valid", "-eeg_snr", "-loss", "-scaler",
+              "-checkpoint_monitor", "-no_early_stop", "-resume", "-model"}
+    if any(str(arg).split("=", 1)[0] in locked for arg in extra):
+        raise SystemExit("HARD STOP: extra arguments cannot override the frozen training profile/protocol")
+    job.manifest["training_profile"] = profile
+    job.manifest["training_profile_sha256"] = hashlib.sha256(PROFILE_PATH.read_bytes()).hexdigest()
+    job.save()
     # Save checkpoints/logs into Kaggle output during training, including failures.
     results = job.out.resolve() / "training"
     job.run(f"train_{model}", [
@@ -183,9 +195,14 @@ def train(job, model, n_load, epochs, extra):
         "-simu_type", "sereega", "-source_space", "fsav_994", "-electrode_montage", "standard_1020",
         "-orientation", "constrained", "-model", model, "-loss", "cosine", "-scaler", "linear",
         "-eeg_snr", "5", "-n_times", "500", "-per_valid", "0.25", "-to_load", str(n_load),
-        "-n_epochs", str(epochs), "-batch_size", "8", "-require_cuda",
+        "-n_epochs", str(epochs), "-batch_size", str(profile["batch_size"]), "-require_cuda",
         "-checkpoint_monitor", "validation_loss", "-save_comparison_checkpoint",
         "-plain_progress", "-save_last_checkpoint",
+        "-num_workers", str(profile["num_workers"]),
+        "-prefetch_factor", str(profile["prefetch_factor"]),
+        "-devices", str(profile["devices"]), "-precision", profile["precision"],
+        *(["-pin_memory"] if profile["pin_memory"] else []),
+        *(["-persistent_workers"] if profile["persistent_workers"] else []),
         "-leadfield_mat", str(ROOT / "anatomy/leadfield_75_20k.mat"), "-simu_folder", str(SIMU / "train8k_s0"),
         *extra,
     ], cwd=ROOT / "model_training")
