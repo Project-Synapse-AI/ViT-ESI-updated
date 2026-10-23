@@ -25,6 +25,22 @@ class ComparisonChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Duplicate depths"):
             compare([self.control, self.control], repeats=1000)
 
+    def test_paired_intervals_use_row_differences(self):
+        # Reorder real measured values in memory to exercise the numerical
+        # comparison, without inventing a trained variant or saving fake results.
+        variant = copy.deepcopy(self.control)
+        variant["depth"] = 1
+        for dataset in SETS:
+            variant["eval"][dataset]["values"] = variant["eval"][dataset]["values"][::-1].copy()
+        records = compare([self.control, variant], repeats=1000)
+        for dataset in SETS:
+            delta = variant["eval"][dataset]["values"] - self.control["eval"][dataset]["values"]
+            expected = interval(delta, 1000, 0)
+            rows = [r for r in records if r["depth"] == 1 and r["dataset"] == dataset]
+            np.testing.assert_allclose([r["delta"] for r in rows], delta.mean(axis=0))
+            np.testing.assert_array_equal([r["delta_ci_low"] for r in rows], expected[0])
+            np.testing.assert_array_equal([r["delta_ci_high"] for r in rows], expected[1])
+
     def test_bootstrap_reproducible(self):
         values = self.control["eval"][SETS[1]]["values"]
         a = interval(values, 1000, 0)
