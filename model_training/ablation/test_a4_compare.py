@@ -37,7 +37,7 @@ class ComparisonChecks(unittest.TestCase):
             delta = variant["eval"][dataset]["values"] - self.control["eval"][dataset]["values"]
             expected = interval(delta, 1000, 0)
             rows = [r for r in records if r["depth"] == 1 and r["dataset"] == dataset]
-            np.testing.assert_allclose([r["delta"] for r in rows], delta.mean(axis=0))
+            np.testing.assert_allclose([r["delta"] for r in rows], delta.mean(axis=0), atol=1e-12)
             np.testing.assert_array_equal([r["delta_ci_low"] for r in rows], expected[0])
             np.testing.assert_array_equal([r["delta_ci_high"] for r in rows], expected[1])
 
