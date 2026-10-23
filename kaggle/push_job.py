@@ -100,7 +100,15 @@ def main():
 
     if args.push:
         kaggle = Path(sys.executable).with_name("kaggle.exe" if sys.platform == "win32" else "kaggle")
-        subprocess.run([str(kaggle), "kernels", "push", "-p", str(out)], check=True)
+        result = subprocess.run([str(kaggle), "kernels", "push", "-p", str(out)],
+                                capture_output=True, text=True, encoding="utf-8", errors="replace")
+        output = result.stdout + result.stderr
+        print(output, end="", flush=True)
+        # Kaggle 2.2.4 returns zero even for some API errors (e.g. GPU slot limit).
+        if result.returncode or "Kernel push error:" in output:
+            raise SystemExit("Kaggle rejected the submission; notebook remains built locally")
+        if not re.search(r"Kernel version \d+ successfully pushed", output):
+            raise SystemExit("Submission was not confirmed; check Kaggle status before retrying")
         print(f"submitted: https://www.kaggle.com/code/{user}/{slug}")
 
 

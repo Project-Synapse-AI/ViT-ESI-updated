@@ -61,6 +61,34 @@ The short benchmark's throughput gain is not a whole-run duration guarantee.
    and parameter count. Depth changes both architecture and parameter count;
    interpret together with A1/A2/A5 rather than claiming causal separation here.
 
+## Analysis while training
+
+`A4_METHODS.md` contains the methods draft. `a4_compare.py` analyses saved
+outputs without training or changing the evaluation harness:
+
+```powershell
+python model_training/ablation/a4_compare.py --control model_training/results/ablation/a4/depth6-workers4-s0/download/out --out model_training/results/ablation/a4/comparison
+```
+
+When a full variant finishes and its artifacts have been downloaded, repeat
+with `--variant model_training/results/ablation/a4/depth1-workers4-s0/download/out`.
+Add `--variant` once per completed depth. Incomplete runs and smoke runs are
+rejected. The first control-only report is explicitly labelled as such.
+All runs must use the frozen source commit above; analysis-only commits do not
+change the source pinned in future Kaggle notebooks (`push_job.py --commit`).
+
+Outputs: `metrics.csv`, `comparison.json` with checkpoint/CSV hashes,
+`REPORT.md`, and PNG/PDF plots of LE versus depth and parameters. All five
+metrics receive means, 95% sample-bootstrap intervals and paired differences
+against depth 6 (5,000 draws, analysis seed 0). These intervals do not measure
+training-seed variation. No metric formula is modified.
+
+Run the regression checks on the real archived control:
+
+```powershell
+python model_training/ablation/test_a4_compare.py --control model_training/results/ablation/a4/depth6-workers4-s0/download/out
+```
+
 ## Storage and completion
 
 Source/commands/decisions go in the A4 PR. Generated outputs remain gitignored:
