@@ -68,6 +68,34 @@ class ComparisonChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unmatched evaluation seed"):
             compatible(self.control, variant)
 
+    def test_host_kernel_release_disclosed_but_compatible(self):
+        variant = copy.deepcopy(self.control)
+        variant["train"]["environment"]["platform"] = "Linux-6.18.55+-x86_64-with-glibc2.39"
+        compatible(self.control, variant)
+
+    def test_runtime_and_glibc_changes_rejected(self):
+        for key, value in (("torch", "different-version"),
+                           ("platform", "Linux-6.18.55+-x86_64-with-glibc2.40")):
+            variant = copy.deepcopy(self.control)
+            variant["train"]["environment"][key] = value
+            with self.assertRaisesRegex(ValueError, "Unmatched training"):
+                compatible(self.control, variant)
+
+    def test_package_inventory_change_rejected(self):
+        from unittest.mock import patch
+        original = Path.read_text
+        calls = []
+        def changed(path, *args, **kwargs):
+            text = original(path, *args, **kwargs)
+            if path.name == "pip_freeze.txt":
+                calls.append(path)
+                if len(calls) == 2:
+                    text += "\nchanged-package==1\n"
+            return text
+        with patch.object(Path, "read_text", changed):
+            with self.assertRaisesRegex(ValueError, "Unmatched package inventory"):
+                compatible(self.control, copy.deepcopy(self.control))
+
     def test_sample_metadata_change_rejected(self):
         variant = copy.deepcopy(self.control)
         variant["eval"][SETS[1]]["rows"][0]["id"] = "wrong"

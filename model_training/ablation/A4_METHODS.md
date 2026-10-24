@@ -56,3 +56,12 @@ and settings, downloaded checkpoint hashes, selected-weight provenance,
 2,000 unique paired evaluation indices, finite five-metric rows, and agreement
 between CSV means and evaluation summaries. Generated tables, plots and JSON
 provenance stay in the ignored results directory and are archived separately.
+
+Kaggle changed its host Linux kernel from 6.18.48 to 6.18.55 between the
+depth6/1 and depth2/3 runs. The analysis permits Linux kernel-release differences
+only while requiring matching architecture/glibc, all other recorded training
+runtime fields, and the full recorded package inventory. It retains each platform
+and package-inventory hash in JSON and Markdown reports. Host environments are
+therefore not identical; disclose this limitation, especially for timing claims.
+No scientific setting, package version or metric formula is changed by this
+analysis policy.

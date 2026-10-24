@@ -7,6 +7,7 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path, PurePosixPath
 
@@ -126,9 +127,21 @@ def load_run(root):
 def compatible(control, variant):
     for key in ("seed", "train_indices", "heldout_indices", "train_ids", "heldout_ids",
                 "heldout_sample_ids", "optimizer", "learning_rate", "noise_type",
-                "early_stopping_enabled", "gradient_clip_val", "data_loading", "trainer_options",
-                "environment"):
+                "early_stopping_enabled", "gradient_clip_val", "data_loading", "trainer_options"):
         require(control["train"][key] == variant["train"][key], f"Unmatched training {key}")
+    # Kaggle controls the Linux host kernel. Keep every other recorded runtime
+    # field exact, retain architecture/glibc checks, and disclose kernel drift.
+    for key in control["train"]["environment"].keys() | variant["train"]["environment"].keys():
+        a = control["train"]["environment"].get(key)
+        b = variant["train"]["environment"].get(key)
+        if key == "platform" and a != b:
+            normalize = lambda s: re.sub(r"^Linux-[^-]+-", "Linux-<kernel>-", s)
+            require(a.startswith("Linux-") and b.startswith("Linux-") and
+                    normalize(a) == normalize(b), "Unmatched training platform architecture/glibc")
+        else:
+            require(a == b, f"Unmatched training environment {key}")
+    require(set((control["root"] / "pip_freeze.txt").read_text().splitlines()) ==
+            set((variant["root"] / "pip_freeze.txt").read_text().splitlines()), "Unmatched package inventory")
     # Paths may differ between notebooks; every other training option must match.
     ignored = {"vit_depth", "results_path", "root_simu", "simu_folder", "leadfield_mat"}
     for key in control["train"]["args"].keys() | variant["train"]["args"].keys():
@@ -192,6 +205,8 @@ def write_outputs(runs, records, out, repeats, seed):
                   analysis_commit=subprocess.check_output(
                       ["git", "rev-parse", "HEAD"], cwd=Path(__file__).parent, text=True).strip(),
                   runs=[dict(depth=r["depth"], source_commit=r["train"]["git_commit"],
+                             training_environment=r["train"]["environment"],
+                             package_inventory_sha256=digest(r["root"] / "pip_freeze.txt"),
                              profile_sha256=r["job"]["training_profile_sha256"],
                              checkpoint=r["train"]["checkpoints"]["validation_loss"],
                              output=str(r["root"]),
@@ -209,6 +224,13 @@ def write_outputs(runs, records, out, repeats, seed):
     for run in report["runs"]:
         lines.append(f"- Depth {run['depth']}: source `{run['source_commit']}`, validation-selected weights "
                      f"`{run['checkpoint']['weights_sha256']}`, outputs `{run['output']}`.")
+        lines.append(f"  Host platform: `{run['training_environment']['platform']}`; "
+                     f"package inventory SHA-256 `{run['package_inventory_sha256']}`.")
+    platforms = {r["training_environment"]["platform"] for r in report["runs"]}
+    if len(platforms) > 1:
+        lines += ["", "Host-kernel variation is present. Recorded runtime fields and package inventories "
+                  "match; only the Linux kernel release differs. This is a disclosed limitation, "
+                  "especially for timing comparisons; host environments are not identical."]
     if len(runs) == 1:
         lines += ["", "Control only: variants are pending. No depth effect can be inferred yet."]
     (out / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
