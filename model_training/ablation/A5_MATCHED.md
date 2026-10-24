@@ -1,9 +1,20 @@
-# A5: parameter-matched CNN and LSTM (preparation)
+# A5: parameter-matched CNN and LSTM
 
 Tracking: issue #9. Initial seed0 scope is a CNN and LSTM close to the
-3,565,538-parameter original six-layer ViTESI architecture. No A5 training
-has been submitted. This note records sizing and the current tooling blocker;
-it is not a frozen or completed experiment record.
+3,565,538-parameter original six-layer ViTESI architecture. Both Linux CUDA
+check suites and real-data smoke audits passed. The full100epoch CNN is running;
+the LSTM full run is deferred for quota. This is not a completed result record.
+
+Scientific source: `c5706f169bcda3d0693a17ce0d549bbd86660f8e`; smoke auditor
+and scheduling notes: `fa3bcd4`. Full CNN notebook:
+`dasunwijethunga/a5-cnn2604-workers4-s0`,version1. Exact command:
+
+```powershell
+python kaggle/push_job.py --job full --model 1DCNN --commit c5706f169bcda3d0693a17ce0d549bbd86660f8e --train-args="-inter_layer 2604 -kernel_size 5" --eval-args="-inter_layer 2604 -kernel_size 5" --a5-checks --title "a5 cnn2604 workers4 s0" --push
+```
+
+Future LSTM jobs use modelLSTM and matching train/eval flags
+`-lstm_hidden_size 295`,plus `--a5-checks`,only when quota covers the full budget.
 
 ## Architecture choices verified from actual modules
 
