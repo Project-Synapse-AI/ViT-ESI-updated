@@ -6,6 +6,10 @@ all 100 epochs, the 6000/2000 split, and both 2000-sample five-metric evaluation
 Temporal error (ms) remains a primary reported metric alongside LE, AUC, nMSE
 and PSNR. No test result is used for tuning or model selection.
 
+The initial scope is complete: both full runs and all paired five-metric audits
+passed, and checkpoints/results/figures are archived with read-back checksums.
+See [A2_RESULTS.md](A2_RESULTS.md) for preliminary findings and limitations.
+
 ## Chosen interventions
 
 - `-vit_mixer attention` is the unchanged default original architecture.
