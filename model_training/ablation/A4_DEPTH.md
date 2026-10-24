@@ -3,6 +3,10 @@
 Tracking: issue #7. Initial sweep uses training seed 0 and depths 6 (control),
 1, 2, 3 and 4. Additional seeds are outside this initial GPU budget.
 
+The initial sweep is complete: all full runs, paired five-metric audits and
+mounted Drive archives passed. See [A4_RESULTS.md](A4_RESULTS.md) for the tables,
+temporal-error findings, checkpoint provenance and preliminary interpretation.
+
 ## Fixed conditions
 
 - Data: frozen `train8k_s0`, verified against its 8,000-sample fingerprint;

@@ -1,7 +1,8 @@
-# A4 methods draft
+# A4 methods
 
-This describes the locked initial sweep. Results and interpretation remain pending
-until the planned depths have completed and passed audit.
+This describes the locked initial sweep. All five planned depths have completed
+and passed audit; see [A4_RESULTS.md](A4_RESULTS.md) for preliminary findings and
+the separate limits on broader generalization.
 
 We vary the ViTESI Transformer encoder depth over 1, 2, 3, 4 and 6 layers,
 with depth 6 as the matched control. All models use 256-dimensional embeddings,
