@@ -16,6 +16,45 @@ from torch import nn
 import pytorch_lightning as pl
 
 
+class FixedAveragingLayer(nn.Module):
+    """Preserve a pre-norm encoder layer except for its attention branch."""
+
+    def __init__(self, layer: nn.TransformerEncoderLayer, mixer: str, radius: int):
+        super().__init__()
+        self.mixer = mixer
+        self.radius = radius
+        # Reuse initialized modules; replacing attention must not consume RNG.
+        for name in ("norm1", "norm2", "linear1", "linear2", "dropout", "dropout1", "dropout2"):
+            setattr(self, name, getattr(layer, name))
+        self.activation = layer.activation
+
+    def mix(self, x: torch.Tensor) -> torch.Tensor:
+        if self.mixer == "mean":
+            return x.mean(dim=1, keepdim=True).expand_as(x)
+        # Pool independently per feature; exclude zero padding from the divisor.
+        return torch.nn.functional.avg_pool1d(
+            x.transpose(1, 2), kernel_size=2 * self.radius + 1,
+            stride=1, padding=self.radius, count_include_pad=False,
+        ).transpose(1, 2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.dropout1(self.mix(self.norm1(x)))
+        return x + self.dropout2(self.linear2(self.dropout(self.activation(self.linear1(self.norm2(x))))))
+
+
+class FixedAveragingEncoder(nn.Module):
+    def __init__(self, encoder: nn.TransformerEncoder, mixer: str, radius: int):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            FixedAveragingLayer(layer, mixer, radius) for layer in encoder.layers
+        ])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
 class EEGViT(nn.Module):
     def __init__(
         self,
@@ -27,8 +66,14 @@ class EEGViT(nn.Module):
         num_heads: int = 8,
         mlp_dim: int = 512,
         dropout: float = 0.1,
+        mixer: str = "attention",
+        window_radius: int = 5,
     ) -> None:
         super().__init__()
+        if mixer not in ("attention", "mean", "window"):
+            raise ValueError(f"Unknown timepoint mixer: {mixer}")
+        if window_radius < 0 or (mixer == "window" and window_radius >= n_times):
+            raise ValueError("window_radius must be nonnegative and smaller than n_times for window mixing")
         self.num_sensor = num_sensor
         self.num_source = num_source
         self.n_times = n_times
@@ -50,6 +95,8 @@ class EEGViT(nn.Module):
         self.out_proj = nn.Linear(embed_dim, num_source)
 
         self._reset_parameters()
+        if mixer != "attention":
+            self.encoder = FixedAveragingEncoder(self.encoder, mixer, window_radius)
 
     def _reset_parameters(self) -> None:
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
@@ -88,6 +135,8 @@ class EEGViTpl(pl.LightningModule):
         optimizer=torch.optim.Adam,
         lr: float = 1e-3,
         criterion=torch.nn.MSELoss(),
+        mixer: str = "attention",
+        window_radius: int = 5,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["criterion", "optimizer"])
@@ -105,6 +154,8 @@ class EEGViTpl(pl.LightningModule):
             num_heads=num_heads,
             mlp_dim=mlp_dim,
             dropout=dropout,
+            mixer=mixer,
+            window_radius=window_radius,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -196,6 +196,8 @@ def build_model(name, args, n_sensors, n_sources, n_times):
             num_heads=args.vit_heads,
             mlp_dim=args.vit_mlp_dim,
             dropout=args.vit_dropout,
+            mixer=getattr(args, "vit_mixer", "attention"),
+            window_radius=getattr(args, "vit_window_radius", 5),
             optimizer=None,
             lr=1e-3,
             criterion=None,
@@ -285,6 +287,8 @@ def main():
     p.add_argument("-deepsif_temporal_input_size", type=int, default=500, help="DeepSIF hidden size (main_train.py default)")
     p.add_argument("-vit_embed_dim", type=int, default=256)
     p.add_argument("-vit_depth", type=int, default=6)
+    p.add_argument("-vit_mixer", choices=["attention", "mean", "window"], default="attention")
+    p.add_argument("-vit_window_radius", type=int, default=5)
     p.add_argument("-vit_heads", type=int, default=8)
     p.add_argument("-vit_mlp_dim", type=int, default=512)
     p.add_argument("-vit_dropout", type=float, default=0.1)

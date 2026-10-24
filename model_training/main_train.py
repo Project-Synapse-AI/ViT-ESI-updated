@@ -116,6 +116,8 @@ def main():
     parser.add_argument("-vit_heads", type=int, default=8, help="EEGViT number of attention heads")
     parser.add_argument("-vit_mlp_dim", type=int, default=512, help="EEGViT feedforward dimension")
     parser.add_argument("-vit_dropout", type=float, default=0.1, help="EEGViT dropout")
+    parser.add_argument("-vit_mixer", choices=["attention", "mean", "window"], default="attention")
+    parser.add_argument("-vit_window_radius", type=int, default=5)
     parser.add_argument(
         "-leadfield_mat",
         type=str,
@@ -418,6 +420,8 @@ def main():
             "num_heads": args.vit_heads,
             "mlp_dim": args.vit_mlp_dim,
             "dropout": args.vit_dropout,
+            "mixer": args.vit_mixer,
+            "window_radius": args.vit_window_radius,
             "optimizer": torch.optim.Adam,
             "lr": lr,
             "criterion": crit,

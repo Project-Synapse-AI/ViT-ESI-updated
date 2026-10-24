@@ -31,6 +31,13 @@ proof that default-attention initialization/forward/state-dict behaviour is
 unchanged and a recorded cross-source audit; do not run the A4 comparison
 script on these variants or mix in the older local reference.
 
+Local CUDA checks passed (5 tests): default attention has identical state keys,
+initialized tensors and train/eval outputs to the pre-A2 implementation under
+fixed RNG; fixed branches have identical shared initialized weights. Both mean
+and window models contain 1,986,530 parameters versus 3,565,538 for attention.
+Checks cover feature-independent averaging, edge divisors, radius-zero identity,
+finite gradients, output shape, strict state loading and invalid options.
+
 ## Execution gates
 
 1. Verify default attention against the pre-A2 implementation under fixed RNG,
