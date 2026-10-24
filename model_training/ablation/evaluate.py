@@ -219,7 +219,7 @@ def build_model(name, args, n_sensors, n_sources, n_times):
 
         return HeckerLSTMpl(
             n_electrodes=n_sensors,
-            hidden_size=85,
+            hidden_size=getattr(args, "lstm_hidden_size", 85),
             n_sources=n_sources,
             bias=False,
             optimizer=None,
@@ -283,6 +283,7 @@ def main():
     p.add_argument("-seed", type=int, default=0)
     p.add_argument("-device", default="cuda", choices=["cuda", "cpu"])
     p.add_argument("-inter_layer", type=int, default=4096, help="1DCNN hidden channels (main_train.py default)")
+    p.add_argument("-lstm_hidden_size", type=int, default=85)
     p.add_argument("-kernel_size", type=int, default=5, help="1DCNN kernel size (main_train.py default)")
     p.add_argument("-deepsif_temporal_input_size", type=int, default=500, help="DeepSIF hidden size (main_train.py default)")
     p.add_argument("-vit_embed_dim", type=int, default=256)
