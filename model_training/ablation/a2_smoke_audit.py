@@ -1,7 +1,8 @@
-"""Audit real A2 Kaggle smoke outputs before authorizing full jobs.
+"""Audit real A2 Kaggle outputs; the CLI remains smoke-only.
 
 Downloads must include selected VIT_model.pt; resumable smoke checkpoints are
-not required or claimed as verified. This does not accept full scientific runs.
+not required or claimed as verified. The explicit full=True API also checks all
+exported full-run checkpoint hashes and the complete 6000/2000 training split.
 """
 import argparse
 import csv
@@ -15,10 +16,12 @@ from a4_compare import METRICS, PROFILE, artifact, digest, require
 SOURCE = "a999ec5f3c838cce2574edc50ecd2e36f5f456bb"
 
 
-def audit(root, mixer):
+def audit(root, mixer, *, full=False):
     root = root.resolve()
+    require(mixer in ("mean", "window"), "Invalid fixed mixer")
+    kind, epochs, total, heldout = ("full", 100, 8000, 2000) if full else ("smoke", 2, 100, 25)
     job = json.loads((root / "job_manifest.json").read_text())
-    require(job["args"]["job"] == "smoke" and job["status"] == "passed", "Not a passed smoke")
+    require(job["args"]["job"] == kind and job["status"] == "passed", f"Not a passed {kind}")
     require(job["training_profile_sha256"] == PROFILE, "Wrong profile")
     require(not job["requirements_problems"], "Requirements failed")
     require(job["environment"]["git_commit"] == SOURCE and not job["environment"]["git_dirty"], "Wrong source")
@@ -32,12 +35,12 @@ def audit(root, mixer):
     paths = list(root.glob("training/**/run_manifest.json"))
     require(len(paths) == 1, "Expected one training manifest")
     train = json.loads(paths[0].read_text())
-    require(train["status"] == "completed" and train["completed_epochs"] == 2, "Not two complete epochs")
+    require(train["status"] == "completed" and train["completed_epochs"] == epochs, "Incomplete epochs")
     require(train["git_commit"] == SOURCE and not train["git_dirty"], "Training source mismatch")
     require(train["seed"] == 0 and not train["early_stopping_enabled"], "Wrong seed/stopping")
     require(train["optimizer"] == "Adam" and train["learning_rate"] == .001, "Wrong optimizer")
-    expected = dict(model="VIT", simu_name="train8k_s0", to_load=100, per_valid=.25,
-                    ep=2, bs=8, loss="cosine", scaler="linear", eeg_snr=5, n_times=500,
+    expected = dict(model="VIT", simu_name="train8k_s0", to_load=total, per_valid=.25,
+                    ep=epochs, bs=8, loss="cosine", scaler="linear", eeg_snr=5, n_times=500,
                     vit_depth=6, vit_embed_dim=256, vit_heads=8, vit_mlp_dim=512,
                     vit_dropout=.1, vit_mixer=mixer, vit_window_radius=5,
                     checkpoint_monitor="validation_loss", require_cuda=True,
@@ -46,27 +49,40 @@ def audit(root, mixer):
     for key, value in expected.items():
         require(train["args"][key] == value, f"Wrong training {key}")
     require(train["parameter_count"] == 1986530, "Wrong parameter count")
-    require(len(set(train["train_indices"])) == 75 and len(set(train["heldout_indices"])) == 25,
+    require(len(train["train_indices"]) == len(set(train["train_indices"])) == total-heldout and
+            len(train["heldout_indices"]) == len(set(train["heldout_indices"])) == heldout,
             "Wrong split sizes")
     require(set(train["train_indices"]).isdisjoint(train["heldout_indices"]) and
-            set(train["train_indices"] + train["heldout_indices"]) == set(range(100)), "Bad split")
+            set(train["train_indices"] + train["heldout_indices"]) == set(range(total)), "Bad split")
     selected = train["checkpoints"]["validation_loss"]
-    require(selected["monitor"] == "validation_loss" and 0 <= selected["epoch"] < 2, "Wrong checkpoint selection")
+    require(selected["monitor"] == "validation_loss" and 0 <= selected["epoch"] < epochs, "Wrong checkpoint selection")
     require(digest(artifact(root, selected["weights"])) == selected["weights_sha256"], "Selected weight hash mismatch")
-    for dataset, count in (("train8k_s0_heldout", 25), ("test2k_s1", 100)):
+    if full:
+        require(set(train["checkpoints"]) == {"validation_loss", "train_loss"}, "Missing checkpoint exports")
+        for ckpt in train["checkpoints"].values():
+            for key in ("weights", "checkpoint"):
+                require(digest(artifact(root, ckpt[key])) == ckpt[key + "_sha256"], f"Bad {key} hash")
+        last = list(root.glob("training/**/last.ckpt"))
+        require(len(last) == 1 and last[0].stat().st_size > 0, "Missing last checkpoint")
+    for dataset, count in (("train8k_s0_heldout", heldout), ("test2k_s1", 2000 if full else 100)):
         summary = json.loads((root / "eval" / dataset / "summary.json").read_text())
         require(summary["git_commit"] == SOURCE and not summary["git_dirty"], "Eval source mismatch")
         require(summary["ckpt_sha256"] == selected["weights_sha256"], "Eval used wrong weights")
         require(summary["device"] == "cuda" and summary["n_evaluated"] == count, "Eval size/device mismatch")
         ea = summary["args"]
-        for key, value in dict(vit_mixer=mixer, vit_window_radius=5, vit_depth=6,
+        is_heldout = dataset == "train8k_s0_heldout"
+        for key, value in dict(model="VIT", vit_mixer=mixer, vit_window_radius=5, vit_depth=6,
+                               vit_embed_dim=256, vit_heads=8, vit_mlp_dim=512, vit_dropout=.1,
+                               to_load=total if is_heldout else count,
+                               per_valid=.25 if is_heldout else 1.,
+                               simu_name="train8k_s0" if is_heldout else "test2k_s1",
                                eeg_snr=5, seed=0, legacy_order=False).items():
             require(ea[key] == value, f"Eval mismatch {key}")
         require(ea["heldout"] == (dataset == "train8k_s0_heldout"), "Wrong evaluation set")
         with (root / "eval" / dataset / "per_sample.csv").open(newline="") as f:
             rows = list(csv.DictReader(f))
         ids = [int(r["index"]) for r in rows]
-        expected_ids = set(train["heldout_indices"]) if count == 25 else set(range(100))
+        expected_ids = set(train["heldout_indices"]) if is_heldout else set(range(count))
         require(len(ids) == count and set(ids) == expected_ids, "Wrong sample indices")
         require(all(int(r["id"]) == int(r["index"]) + 1 for r in rows), "Sample ID mismatch")
         for metric in METRICS:
@@ -74,14 +90,16 @@ def audit(root, mixer):
             require(np.isfinite(values).all() and
                     np.isclose(values.mean(), summary["metrics"][metric]["mean"], rtol=1e-10, atol=1e-12),
                     f"Nonfinite/incorrect summary {metric}")
-    report = dict(status="passed", scope="smoke only; not a full scientific result",
-                  source_commit=SOURCE, mixer=mixer, window_radius=5, epochs=2,
+    report = dict(status="passed", scope="full single-seed run" if full else "smoke only; not a full scientific result",
+                  source_commit=SOURCE, mixer=mixer, window_radius=5, epochs=epochs,
                   parameters=1986530, profile_sha256=PROFILE,
                   selected_weights_sha256=selected["weights_sha256"],
                   selected_weight_binary_hash_verified=True,
+                  exported_checkpoint_hashes_verified=full,
                   resumable_checkpoint_hashes_verified=False,
                   checks=["all stages/fingerprints", "source/profile/train/eval settings",
-                          "75/25 split", "selected weights", "25/100 sample IDs and finite five-metric summaries"])
+                          f"{total-heldout}/{heldout} split", "selected weights",
+                          "expected sample IDs and finite five-metric summaries"])
     return report
 
 
