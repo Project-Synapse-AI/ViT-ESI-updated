@@ -10,6 +10,14 @@ The initial scope is complete: both full runs and all paired five-metric audits
 passed, and checkpoints/results/figures are archived with read-back checksums.
 See [A2_RESULTS.md](A2_RESULTS.md) for preliminary findings and limitations.
 
+Full analysis uses `a2_compare.py`, not the A4 depth-comparison entry point. It
+checks the pinned variant and control sources separately, verifies the full
+exported checkpoint hashes and both 2000-row evaluations, and permits only the
+prespecified mixer/radius option differences. Cross-source AST review confirms
+that train/eval mathematics is unchanged after removing those options. Existing
+A4 pairing/runtime/package checks are reused after explicitly validating and
+normalizing the A2 options. Seven real-output regression checks passed.
+
 ## Chosen interventions
 
 - `-vit_mixer attention` is the unchanged default original architecture.

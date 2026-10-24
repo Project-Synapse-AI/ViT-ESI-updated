@@ -8,7 +8,7 @@ Scientific variant source: `a999ec5f3c838cce2574edc50ecd2e36f5f456bb`; attention
 
 The control is the retrained original six-layer architecture used in the depth sweep (heldout/test LE7.03977/6.96316mm). It is distinct from the earlier local checkpoint7.14785/7.10056mm used for attention-removal/timing analyses.
 
-Global mean broadcasts the mean of all pre-normalized tokens to each timepoint. The local alternative uses an equally weighted window of up to five timepoints either side, with boundary renormalization. Both retain six layers, input/output projections, positional embeddings, pre-LayerNorms, residuals, feed-forward blocks and branch-output dropout. Attention projections and attention-weight dropout are removed. No feed-forward widening or window tuning was performed. Both fixed models have1,986,530parameters versus3,565,538:44.28%fewer, so capacity remains a confound. This is not a pure test of learned attention weights alone.
+Global mean broadcasts the mean of all pre-normalized tokens to each timepoint. The local alternative uses an equally weighted window of up to five timepoints either side, with boundary renormalization. Both retain six layers, input/output projections, positional embeddings, pre-LayerNorms, residuals, feed-forward blocks and branch-output dropout. Attention projections and attention-weight dropout are removed. No feed-forward widening or window tuning was performed. Both fixed models have 1,986,530 parameters versus 3,565,538: about 44.3% fewer, so capacity remains a confound. This is not a pure test of learned attention weights alone.
 
 ## Protocol
 
