@@ -46,6 +46,7 @@ def main():
     p.add_argument("--train-args", default="")
     p.add_argument("--eval-args", default="")
     p.add_argument("--widepeak", action="store_true")
+    p.add_argument("--a5-checks", action="store_true", help="Require matched-model CUDA checks inside Kaggle")
     p.add_argument("--commit", default=None, help="commit to run (default: HEAD, must be on origin)")
     p.add_argument("--title", default=None, help="Kaggle notebook title; the slug is derived from it")
     p.add_argument("--out", default=None, help="folder to write (default: kaggle/build/<slug>, gitignored)")
@@ -72,6 +73,7 @@ def main():
         "TRAIN_ARGS": args.train_args,
         "EVAL_ARGS": args.eval_args,
         "WIDEPEAK": args.widepeak,
+        "A5_CHECKS": args.a5_checks,
     }
     nb = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     for cell in nb["cells"]:

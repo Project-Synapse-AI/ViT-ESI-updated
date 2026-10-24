@@ -112,6 +112,7 @@ def main():
         help="DeepSIF hidden size (called temporal_input_size in the original implementation)",
     )
     parser.add_argument("-vit_embed_dim", type=int, default=256, help="EEGViT embedding dimension")
+    parser.add_argument("-lstm_hidden_size", type=int, default=85, help="Hecker LSTM hidden width; original default85")
     parser.add_argument("-vit_depth", type=int, default=6, help="EEGViT number of Transformer layers")
     parser.add_argument("-vit_heads", type=int, default=8, help="EEGViT number of attention heads")
     parser.add_argument("-vit_mlp_dim", type=int, default=512, help="EEGViT feedforward dimension")
@@ -381,7 +382,7 @@ def main():
         lr = 1e-3
         net_parameters = {
             "n_electrodes": n_electrodes,
-            "hidden_size": 85,
+            "hidden_size": args.lstm_hidden_size,
             "n_sources": n_sources,
             "bias": False,
             "optimizer": torch.optim.Adam,
