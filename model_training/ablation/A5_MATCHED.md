@@ -68,9 +68,18 @@ Kaggle quota observed2026-10-25:6.43GPUh remaining, refresh2026-10-31UTC.
 Use actual smoke epoch timing plus setup/evaluation allowance to schedule full
 jobs. Do not assume both100epoch jobs fit, shrink the scientific budget, change
 precision/workers/batch, or add seeds without a separate decision.
-Prioritize the matched LSTM if only one full run fits, because it also unlocks
-the recurrent timing comparison in issue5. Defer a second full job if the quota
-cannot cover it; do not submit a knowingly underfunded100-epoch run.
+Prioritize the matched LSTM when both individual jobs fit but quota covers only
+one, because it also unlocks issue5. If only the CNN individually fits, run that
+one and defer the LSTM. Never submit a knowingly underfunded100-epoch job.
+
+Both sourcec5706f1 Kaggle smokes passed the full stage/settings/selected-weight
+and five-metric audit. All four Linux CUDA tests exited0 inside each notebook.
+Second-epoch timings: CNN2.0s,LSTM2.8s on100examples. Rough8000example/100epoch
+training extrapolations are16000s/22400s. With25%margin plus900s setup/evaluation
+allowance: CNN20900s(5.81h),LSTM28900s(8.03h). Freshquota6.34h covers only the
+CNN under this conservative rule. Schedule the full CNN; defer LSTM until more
+quota is available (next refresh2026-10-31UTC). No scientific budget is reduced.
+These small-smoke estimates are scheduling guidance, not duration guarantees.
 
 ## Intended protocol after the blocker is resolved
 
