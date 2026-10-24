@@ -54,3 +54,20 @@ Initial quota observed16.41GPUh, sufficient for this two-variant initial scope
 using A4's approximately4.2-4.5h measured training durations as rough context,
 not a duration guarantee. Check fresh quota before submissions. Additional
 seeds, windows or architectures require a separate scope/budget decision.
+
+## Frozen source and smoke evidence
+
+Scientific source: `a999ec5f3c838cce2574edc50ecd2e36f5f456bb`. Both real-data
+Kaggle smoke notebooks (mean/window5 workers4 smoke, version1) completed and
+passed `a2_smoke_audit.py`: two epochs,75/25 split,25heldout/100test finite
+five-metric rows,matching mixer/radius/depth/profile/source and selected-weight
+binary hashes. Full recorded package inventories match the A4 depth6 control.
+Smoke metadata/results and selected weights are archived on mounted Drive with
+read-back SHA verification. Resumable smoke checkpoints were not downloaded.
+
+Full commands (after smoke audits, with fresh quota check):
+
+```powershell
+python kaggle/push_job.py --job full --model VIT --commit a999ec5f3c838cce2574edc50ecd2e36f5f456bb --train-args="-vit_mixer mean" --eval-args="-vit_mixer mean" --title "a2 mean workers4 s0" --push
+python kaggle/push_job.py --job full --model VIT --commit a999ec5f3c838cce2574edc50ecd2e36f5f456bb --train-args="-vit_mixer window -vit_window_radius 5" --eval-args="-vit_mixer window -vit_window_radius 5" --title "a2 window5 workers4 s0" --push
+```
