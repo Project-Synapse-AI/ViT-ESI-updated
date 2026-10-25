@@ -11,11 +11,13 @@ SOURCE = "c5706f169bcda3d0693a17ce0d549bbd86660f8e"
 PARAMS = {"1DCNN":3564876, "LSTM":3557700}
 
 
-def audit(root, model):
+def audit(root, model, *, full=False):
     root=root.resolve()
+    require(model in PARAMS, 'Unsupported matched model')
+    kind, total, heldout_count, epochs_count = ('full',8000,2000,100) if full else ('smoke',100,25,2)
     j=json.loads((root/'job_manifest.json').read_text())
-    require(j['status']=='passed' and j['args']['job']=='smoke' and j['args']['model']==model,
-            'Not the expected passed smoke')
+    require(j['status']=='passed' and j['args']['job']==kind and j['args']['model']==model,
+            f'Not the expected passed {kind}')
     require(j['args']['a5_checks'] is True, 'Missing mandatory Linux CUDA check gate')
     env=j['environment']
     require(env['git_commit']==SOURCE and not env['git_dirty'], 'Wrong/dirty source')
@@ -28,36 +30,43 @@ def audit(root, model):
             'Failed/missing stages (including Linux CUDA tests)')
     paths=list(root.glob('training/**/run_manifest.json'));require(len(paths)==1,'Expected one training manifest')
     t=json.loads(paths[0].read_text());a=t['args']
-    require(t['status']=='completed' and t['completed_epochs']==2,'Incomplete smoke')
+    require(t['status']=='completed' and t['completed_epochs']==epochs_count,'Incomplete training')
     require(t['git_commit']==SOURCE and not t['git_dirty'],'Wrong training source')
     require(t['seed']==0 and not t['early_stopping_enabled'] and t['optimizer']=='Adam' and t['learning_rate']==.001,
             'Wrong seed/stopping/optimizer')
-    fixed=dict(model=model,simu_name='train8k_s0',to_load=100,per_valid=.25,ep=2,bs=8,loss='cosine',
+    fixed=dict(model=model,simu_name='train8k_s0',to_load=total,per_valid=.25,ep=epochs_count,bs=8,loss='cosine',
                scaler='linear',eeg_snr=5,n_times=500,checkpoint_monitor='validation_loss',require_cuda=True,
                num_workers=4,pin_memory=True,persistent_workers=True,prefetch_factor=1,devices=1,precision='32-true',
                inter_layer=2604 if model=='1DCNN' else 4096,kernel_size=5,
                lstm_hidden_size=295 if model=='LSTM' else 85)
     for key,value in fixed.items():require(a[key]==value,f'Wrong training {key}')
     require(t['parameter_count']==PARAMS[model],'Wrong matched parameter count')
-    require(len(t['train_indices'])==len(set(t['train_indices']))==75 and
-            len(t['heldout_indices'])==len(set(t['heldout_indices']))==25,'Wrong split sizes')
+    require(len(t['train_indices'])==len(set(t['train_indices']))==total-heldout_count and
+            len(t['heldout_indices'])==len(set(t['heldout_indices']))==heldout_count,'Wrong split sizes')
     require(set(t['train_indices']).isdisjoint(t['heldout_indices']) and
-            set(t['train_indices']+t['heldout_indices'])==set(range(100)),'Bad split')
+            set(t['train_indices']+t['heldout_indices'])==set(range(total)),'Bad split')
     chosen=t['checkpoints']['validation_loss']
-    require(chosen['monitor']=='validation_loss' and 0<=chosen['epoch']<2,'Wrong selected checkpoint')
+    require(chosen['monitor']=='validation_loss' and 0<=chosen['epoch']<epochs_count,'Wrong selected checkpoint')
     require(digest(artifact(root,chosen['weights']))==chosen['weights_sha256'],'Selected weight hash mismatch')
-    for dataset,n in [('train8k_s0_heldout',25),('test2k_s1',100)]:
-        p=root/'eval'/dataset;s=json.loads((p/'summary.json').read_text());ea=s['args'];heldout=n==25
+    if full:
+        require(set(t['checkpoints'])=={'train_loss','validation_loss'},'Missing checkpoint exports')
+        for ckpt in t['checkpoints'].values():
+            for key in ('weights','checkpoint'):
+                require(digest(artifact(root,ckpt[key]))==ckpt[key+'_sha256'],f'Bad {key} hash')
+        last=list(root.glob('training/**/last.ckpt'))
+        require(len(last)==1 and last[0].stat().st_size>0,'Missing last checkpoint')
+    for dataset,n in [('train8k_s0_heldout',heldout_count),('test2k_s1',2000 if full else 100)]:
+        p=root/'eval'/dataset;s=json.loads((p/'summary.json').read_text());ea=s['args'];heldout=dataset=='train8k_s0_heldout'
         require(s['git_commit']==SOURCE and not s['git_dirty'] and s['ckpt_sha256']==chosen['weights_sha256'],
                 'Eval source/weights mismatch')
         require(s['device']=='cuda' and s['n_evaluated']==n,'Wrong eval device/count')
         expected=dict(model=model,inter_layer=fixed['inter_layer'],kernel_size=5,lstm_hidden_size=fixed['lstm_hidden_size'],
-                      seed=0,eeg_snr=5,legacy_order=False,heldout=heldout,to_load=100,per_valid=.25 if heldout else 1.,
+                      seed=0,eeg_snr=5,legacy_order=False,heldout=heldout,to_load=total if heldout else n,per_valid=.25 if heldout else 1.,
                       simu_name='train8k_s0' if heldout else 'test2k_s1')
         for key,value in expected.items():require(ea[key]==value,f'Wrong evaluation {key}')
         with (p/'per_sample.csv').open(newline='') as f:rows=list(csv.DictReader(f))
         ids=[int(r['index']) for r in rows]
-        require(len(ids)==n and set(ids)==(set(t['heldout_indices']) if heldout else set(range(100))), 'Bad sample IDs')
+        require(len(ids)==n and set(ids)==(set(t['heldout_indices']) if heldout else set(range(n))), 'Bad sample IDs')
         require(all(int(r['id'])==int(r['index'])+1 for r in rows),'Sample ID/index mismatch')
         for metric in METRICS:
             values=np.array([float(r[metric]) for r in rows])
@@ -65,13 +74,14 @@ def audit(root, model):
                     f'Bad finite metric/mean {metric}')
     events=[json.loads(line) for line in (paths[0].parent/'progress.jsonl').read_text().splitlines()]
     epochs=[e for e in events if e['event']=='validation_end']
-    require(len(epochs)==2 and all(e['epoch_s']>0 for e in epochs),'Missing epoch timing')
+    require(len(epochs)==epochs_count and all(e['epoch_s']>0 for e in epochs),'Missing epoch timing')
     # 100 smoke examples versus8000 full examples:80x examples/epoch,100epochs.
     # This is deliberately a rough scheduling estimate, not a speed claim.
-    estimate=epochs[-1]['epoch_s']*80*100
-    return dict(status='passed',scope='smoke only; not a full scientific result',source_commit=SOURCE,
-                model=model,parameters=PARAMS[model],epochs=2,linux_cuda_suite_exit=0,
+    estimate=None if full else epochs[-1]['epoch_s']*80*100
+    return dict(status='passed',scope='full single-seed run' if full else 'smoke only; not a full scientific result',source_commit=SOURCE,
+                model=model,parameters=PARAMS[model],epochs=epochs_count,linux_cuda_suite_exit=0,
                 selected_weights_sha256=chosen['weights_sha256'],selected_weight_binary_verified=True,
+                exported_checkpoint_hashes_verified=full,
                 resumable_checkpoint_hashes_verified=False,epoch_timings=epochs,
                 rough_full_training_seconds=estimate,
                 scheduling_caution='Small smoke timing includes fixed overhead; confirm against live full epochs. '
