@@ -234,6 +234,7 @@ def main():
     p.add_argument("--train-args", default="", help="extra main_train.py flags, e.g. '-vit_depth 4'")
     p.add_argument("--eval-args", default="", help="matching evaluate.py flags, e.g. '-vit_depth 4'")
     p.add_argument("--widepeak", action="store_true", help="also regenerate widepeak2k_s2 and score it (A3)")
+    p.add_argument("--a5-checks", action="store_true", help="Require matched-model CUDA unit checks before scientific stages")
     p.add_argument("--out", default="/kaggle/working/out")
     args = p.parse_args()
 
@@ -243,6 +244,10 @@ def main():
     job.save()
     environment(job)
     install(job)
+    if args.a5_checks:
+        if args.model not in ("1DCNN", "LSTM") or args.job == "benchmark":
+            raise SystemExit("A5 checks require a CNN/LSTM scientific job")
+        job.run("a5_model_checks", [sys.executable, "model_training/ablation/test_a5_matched.py"])
 
     if args.job == "benchmark":
         if args.model != "VIT" or args.train_args or args.eval_args or args.widepeak:
