@@ -2,8 +2,9 @@
 
 Tracking: issue #9. Initial seed0 scope is a CNN and LSTM close to the
 3,565,538-parameter original six-layer ViTESI architecture. Both Linux CUDA
-check suites and real-data smoke audits passed. The full100epoch CNN is running;
-the LSTM full run is deferred for quota. This is not a completed result record.
+check suites and real-data smoke audits passed. The full100epoch CNN completed
+and passed full-output/paired audits; see [A5_RESULTS.md](A5_RESULTS.md).
+The LSTM full run is deferred for quota. A5 as a whole remains incomplete.
 
 Scientific source: `c5706f169bcda3d0693a17ce0d549bbd86660f8e`; smoke auditor
 and scheduling notes: `fa3bcd4`. Full CNN notebook:
